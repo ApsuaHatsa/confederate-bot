@@ -1,7 +1,6 @@
 # Игнорируем виртуальное окружение и секретные файлы
 .venv/
 src/.env
-src/config.py
 bridge.db
 *.db
 *.log
