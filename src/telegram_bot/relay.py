@@ -119,7 +119,46 @@ def _relay_variants_for_text(text, base_text, discord_text, telegram_html):
         return discord_text, telegram_html
     return text, None
 
-def _serialize_first_telegram_message(message: Message, *, chat_id: str, bridge_id: int, reply_to_msg_db_id, forward_type, forward_name, external_reply=False):
+_custom_title_cache = {}
+
+async def _get_telegram_sender_display_name(message: Message) -> str:
+    """If the user has a custom admin title/tag in Telegram, return ONLY custom_title.
+    Otherwise return message.from_user.full_name without username."""
+    if not message.from_user:
+        return getattr(message.chat, "title", None) or "Unknown"
+
+    author_sig = getattr(message, "author_signature", None)
+    if author_sig and author_sig.strip():
+        return author_sig.strip()
+
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    cache_key = (chat_id, user_id)
+    now = time.time()
+
+    if cache_key in _custom_title_cache:
+        title, expires = _custom_title_cache[cache_key]
+        if now < expires:
+            if title:
+                return title
+            return message.from_user.full_name or "Unknown"
+
+    custom_title = None
+    try:
+        member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        custom_title = getattr(member, "custom_title", None)
+    except Exception:
+        pass
+
+    _custom_title_cache[cache_key] = (custom_title, now + 300)
+
+    if custom_title and custom_title.strip():
+        return custom_title.strip()
+
+    return message.from_user.full_name or "Unknown"
+
+async def _serialize_first_telegram_message(message: Message, *, chat_id: str, bridge_id: int, reply_to_msg_db_id, forward_type, forward_name, external_reply=False):
+
     """Freeze everything needed to relay this message later, as JSON.
 
     Held for a user who has not consented yet: an aiogram Message cannot be
@@ -146,7 +185,9 @@ def _serialize_first_telegram_message(message: Message, *, chat_id: str, bridge_
         "origin_message_id": str(message.message_id),
         "origin_sender_id": str(message.from_user.id) if message.from_user else "",
         "place_name": message.chat.title or "Private chat",
-        "sender_name": message.from_user.full_name if message.from_user else "Unknown",
+        "sender_name": await _get_telegram_sender_display_name(message),
+
+
         "reply_to_msg_db_id": reply_to_msg_db_id,
         "forward_type": forward_type,
         "forward_name": forward_name,
@@ -586,7 +627,9 @@ async def _relay_from_telegram_impl(message: Message, grouped_file_count: int | 
         bridge_id, message.from_user.id if message.from_user else None
     )
 
-    sender_name = message.from_user.full_name if message.from_user else "Unknown"
+    sender_name = await _get_telegram_sender_display_name(message)
+
+
     if is_inbox_conversation:
         from inbox import inbox_sender_override, mark_inbox_conversation, touch_inbox_bridge
         touch_inbox_bridge(bridge_id)
