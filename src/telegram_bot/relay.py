@@ -122,6 +122,7 @@ def _relay_variants_for_text(text, base_text, discord_text, telegram_html):
 _custom_title_cache = {}
 
 async def _get_telegram_sender_display_name(message: Message) -> str:
+
     """If the user has a custom admin title/tag in Telegram, return ONLY custom_title.
     Otherwise return message.from_user.full_name without username."""
     if not message.from_user:
@@ -139,16 +140,14 @@ async def _get_telegram_sender_display_name(message: Message) -> str:
     if cache_key in _custom_title_cache:
         title, expires = _custom_title_cache[cache_key]
         if now < expires:
-            if title:
-                return title
-            return message.from_user.full_name or "Unknown"
+            return title if title else (message.from_user.full_name or "Unknown")
 
     custom_title = None
     try:
         member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         custom_title = getattr(member, "custom_title", None)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("get_chat_member failed: %s", e)
 
     _custom_title_cache[cache_key] = (custom_title, now + 300)
 
@@ -157,15 +156,8 @@ async def _get_telegram_sender_display_name(message: Message) -> str:
 
     return message.from_user.full_name or "Unknown"
 
-async def _serialize_first_telegram_message(message: Message, *, chat_id: str, bridge_id: int, reply_to_msg_db_id, forward_type, forward_name, external_reply=False):
-
-    """Freeze everything needed to relay this message later, as JSON.
-
-    Held for a user who has not consented yet: an aiogram Message cannot be
-    re-fetched from the API, so the rendered texts, both formatted variants,
-    the reply/forward context and the file ids are captured now and replayed
-    by `_relay_serialized_telegram_payload` when the consent button is
-    pressed."""
+def _serialize_first_telegram_message(message: Message, *, chat_id: str, bridge_id: int, reply_to_msg_db_id, forward_type, forward_name, external_reply=False, sender_name="Unknown"):
+    """Freeze everything needed to relay this message later, as JSON."""
     texts, relay_file_count = _build_telegram_relay_texts(message)
     source_text = getattr(message, "text", None)
     source_caption = getattr(message, "caption", None)
@@ -185,9 +177,7 @@ async def _serialize_first_telegram_message(message: Message, *, chat_id: str, b
         "origin_message_id": str(message.message_id),
         "origin_sender_id": str(message.from_user.id) if message.from_user else "",
         "place_name": message.chat.title or "Private chat",
-        "sender_name": await _get_telegram_sender_display_name(message),
-
-
+        "sender_name": sender_name,
         "reply_to_msg_db_id": reply_to_msg_db_id,
         "forward_type": forward_type,
         "forward_name": forward_name,
@@ -203,7 +193,9 @@ async def _serialize_first_telegram_message(message: Message, *, chat_id: str, b
     }
     return json.dumps(payload, ensure_ascii=False)
 
+
 async def _relay_serialized_telegram_payload(payload_json: str):
+
     """Relay a message frozen by `_serialize_first_telegram_message`.
 
     The file upload is deliberately deferred to here rather than done at
