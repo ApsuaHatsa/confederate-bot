@@ -20,6 +20,20 @@ queries it.
 import asyncio
 import logging
 import time
+import os
+import sys
+
+# Ensure src/ directory is in sys.path when running from parent folder
+src_dir = os.path.dirname(os.path.abspath(__file__))
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+
+# Ensure config.py exists on server startup
+config_path = os.path.join(src_dir, "config.py")
+config_example = os.path.join(src_dir, "config.example.py")
+if not os.path.exists(config_path) and os.path.exists(config_example):
+    import shutil
+    shutil.copy(config_example, config_path)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +46,7 @@ from config import DISCORD_TOKEN
 from discord_bot import bot as discord_bot
 from telegram_bot import main as tg_main
 from utils import send_service_event
+
 
 db.init()
 db.cleanup_old_messages(days=30)

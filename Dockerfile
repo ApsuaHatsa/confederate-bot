@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PORT=10000
+ENV PYTHONPATH=/app/src
 
 EXPOSE 10000
 
